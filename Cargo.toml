@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 axum = { version = "0.7", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
 maud = { version = "0.26", features = ["axum"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

@@ -6,10 +6,14 @@ use axum::{
     routing::{get, post},
     Form,
 };
-use maud::{html, Markup, DOCTYPE};
+use maud::{html, Markup};
 use serde::Deserialize;
 
-use crate::session::{AuthSessionLayer, IdContext, LoginError};
+use crate::{
+    htmx::base_html,
+    session::{AuthSessionLayer, IdContext, LoginError},
+    SESSION_KEY_COOKIE_NAME,
+};
 
 const ELEMENT_ID: &str = "login-form";
 const SUBMIT_PATH: &str = "/login-summit";
@@ -31,17 +35,7 @@ where
 /// Show the login page
 async fn login_page() -> Markup {
     let form = login_form("");
-    html! {
-        (DOCTYPE)
-        head {
-            script src="https://unpkg.com/htmx.org@1.9.10"
-                integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC"
-                crossorigin="anonymous" {}
-        }
-        body {
-            (form)
-        }
-    }
+    base_html(form)
 }
 
 fn login_form(err_msg: &str) -> Markup {
@@ -104,7 +98,7 @@ where
     let mut header = HeaderMap::new();
     header.insert(
         "Set-Cookie",
-        format!("session-key={session_key}; SameSite=None; Secure")
+        format!("{SESSION_KEY_COOKIE_NAME}={session_key}; SameSite=None; Secure")
             .parse()
             .unwrap(),
     );
@@ -113,82 +107,4 @@ where
 
 fn referred_id(id: &str) -> String {
     format!("#{id}")
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashMap, time::Duration};
-
-    use axum::async_trait;
-    use tokio::net::TcpListener;
-
-    use crate::session::{IdSource, InitSession};
-
-    use super::*;
-
-    #[derive(Debug)]
-    struct Id {
-        _username: String,
-    }
-    #[derive(Debug)]
-    struct Session {
-        _id: Id,
-    }
-
-    /// Id Source with preset users for test
-    #[derive(Debug)]
-    struct TestIdSource {
-        users: HashMap<String, String>,
-    }
-    impl TestIdSource {
-        pub fn new() -> Self {
-            let users = [("foo", "bar")]
-                .into_iter()
-                .map(|(u, p)| (u.to_owned(), p.to_owned()));
-            let users = HashMap::from_iter(users);
-            Self { users }
-        }
-    }
-    #[async_trait]
-    impl IdSource for TestIdSource {
-        type Id = Id;
-        async fn id(&self, cx: &IdContext<'_>) -> Option<Self::Id> {
-            if self.users.get(cx.username)? != cx.password {
-                return None;
-            }
-            Some(Id {
-                _username: cx.username.to_owned(),
-            })
-        }
-    }
-
-    /// Convert `Id` to `Session`
-    #[derive(Debug)]
-    struct TestInitSession;
-    impl InitSession for TestInitSession {
-        type Id = Id;
-        type Session = Session;
-        fn init_session(&self, id: Self::Id) -> Self::Session {
-            Session { _id: id }
-        }
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_on_web() {
-        let id_source = TestIdSource::new();
-        let init_session = TestInitSession;
-        let auth_session = Arc::new(AuthSessionLayer::new(
-            Duration::from_secs(u64::MAX),
-            id_source,
-            init_session,
-        ));
-        let router = login_router(auth_session);
-        let listener = TcpListener::bind("127.0.0.1:6969")
-            .await
-            .expect("failed to bind");
-        axum::serve(listener, router)
-            .await
-            .expect("failed to serve");
-    }
 }
