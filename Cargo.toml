@@ -1,0 +1,12 @@
+[package]
+name = "auth"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.8"
+session = { git = "https://github.com/Banyc/session.git", rev = "65a1d6ef5358c953a5cf292ca93284904073ca50" }
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
