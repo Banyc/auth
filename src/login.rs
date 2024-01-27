@@ -9,7 +9,7 @@ use axum::{
 use maud::{html, Markup, DOCTYPE};
 use serde::Deserialize;
 
-use crate::{AuthSessionLayer, IdContext, LoginError};
+use crate::session::{AuthSessionLayer, IdContext, LoginError};
 
 const ELEMENT_ID: &str = "login-form";
 const SUBMIT_PATH: &str = "/login-summit";
@@ -122,7 +122,7 @@ mod tests {
     use axum::async_trait;
     use tokio::net::TcpListener;
 
-    use crate::{IdSource, InitSession};
+    use crate::session::{IdSource, InitSession};
 
     use super::*;
 
@@ -152,7 +152,7 @@ mod tests {
     #[async_trait]
     impl IdSource for TestIdSource {
         type Id = Id;
-        async fn id(&self, cx: &crate::IdContext<'_>) -> Option<Self::Id> {
+        async fn id(&self, cx: &IdContext<'_>) -> Option<Self::Id> {
             if self.users.get(cx.username)? != cx.password {
                 return None;
             }
