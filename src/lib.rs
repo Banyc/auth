@@ -65,6 +65,8 @@ mod tests {
     }
 
     /// Id Source with preset users for test
+    ///
+    /// This can be a database handle in production
     #[derive(Debug)]
     struct TestIdSource {
         users: HashMap<String, String>,
