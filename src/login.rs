@@ -17,7 +17,7 @@ const SUBMIT_INDICATOR_ID: &str = "login-submit-indicator";
 
 type AuthState<Session, Id> = Arc<AuthSessionLayer<Session, Id>>;
 
-pub fn auth_router<Session, Id>(auth_session: Arc<AuthSessionLayer<Session, Id>>) -> axum::Router
+pub fn login_router<Session, Id>(auth_session: Arc<AuthSessionLayer<Session, Id>>) -> axum::Router
 where
     Session: std::fmt::Debug + Sync + Send + 'static,
     Id: std::fmt::Debug + Sync + Send + 'static,
@@ -183,7 +183,7 @@ mod tests {
             id_source,
             init_session,
         ));
-        let router = auth_router(auth_session);
+        let router = login_router(auth_session);
         let listener = TcpListener::bind("127.0.0.1:6969")
             .await
             .expect("failed to bind");
