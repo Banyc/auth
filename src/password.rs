@@ -1,36 +1,24 @@
-use std::sync::Arc;
-
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-/// Obfuscated user credential
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credential {
-    pub username: Arc<str>,
-    pub password: Password,
-}
 /// Obfuscated password
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Password {
     hash: U256,
     salt: u64,
 }
-impl Credential {
+impl Password {
     /// Obfuscate the sensitive credential
-    pub fn generate(username: Arc<str>, password: &str) -> Self {
+    pub fn generate(password: &str) -> Self {
         let salt: u64 = rand::thread_rng().gen();
         let hash = hash_password(password, salt);
-        let password = Password { hash, salt };
-        Self { username, password }
+        Self { hash, salt }
     }
 
     /// Check if the provided credential is valid
-    pub fn matches(&self, username: &str, password: &str) -> bool {
-        if username != self.username.as_ref() {
-            return false;
-        }
-        let hash = hash_password(password, self.password.salt);
-        if self.password.hash != hash {
+    pub fn matches(&self, password: &str) -> bool {
+        let hash = hash_password(password, self.salt);
+        if self.hash != hash {
             return false;
         }
         true
@@ -81,18 +69,18 @@ mod tests {
 
     #[test]
     fn test_matches() {
-        let c = Credential::generate("foo".into(), "bar");
-        assert!(c.matches("foo", "bar"));
-        assert!(!c.matches("foo", "foo"));
+        let c = Password::generate("foo");
+        assert!(c.matches("foo"));
+        assert!(!c.matches("bar"));
     }
 
     #[tokio::test]
     async fn test_db_compatibility() {
         // Map a credential to the database model
-        let c = Credential::generate("foo".into(), "bar");
-        let password = ron::to_string(&c.password).unwrap();
+        let password = Password::generate("foo");
+        let password = ron::to_string(&password).unwrap();
         let u = User {
-            username: c.username.to_string(),
+            username: "bar".into(),
             password,
             role: String::from("guest"),
         };
@@ -117,14 +105,10 @@ mod tests {
         assert_eq!(u, r_u);
 
         // Decode the credential part
-        let password = ron::from_str(&r_u.password).unwrap();
-        let r_c = Credential {
-            username: r_u.username.into(),
-            password,
-        };
+        let password: Password = ron::from_str(&r_u.password).unwrap();
 
         // Auth
-        assert!(r_c.matches(&c.username, "bar"));
+        assert!(password.matches("foo"));
 
         #[derive(Debug, PartialEq, Eq, sqlx::FromRow)]
         struct User {

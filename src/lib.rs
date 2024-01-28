@@ -1,7 +1,7 @@
 pub mod cookie;
-pub mod credential;
 pub mod htmx;
 pub mod login;
+pub mod password;
 pub mod session;
 
 const SESSION_KEY_COOKIE_NAME: &str = "session-key";
