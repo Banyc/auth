@@ -49,8 +49,10 @@ mod tests {
     async fn show_session(PulledSession(session): PulledSession<Session>) -> Markup {
         let body = html! {
             h1 { "Session" }
-            p { "Username:" }
-            p { (session.id.username) }
+            p {
+                span { "Username: " }
+                span { (session.id.username) }
+            }
         };
         base_html(body)
     }
