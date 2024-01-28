@@ -11,7 +11,7 @@ use maud::{html, Markup};
 use serde::Deserialize;
 
 use crate::{
-    session::{AuthSessionLayer, IdContext, LoginError},
+    session::{AuthSessionLayer, AuthState, IdContext, LoginError},
     SESSION_KEY_COOKIE_NAME,
 };
 
@@ -19,17 +19,14 @@ const ELEMENT_ID: &str = "login-form";
 const SUBMIT_PATH: &str = "/login-summit";
 const SUBMIT_INDICATOR_ID: &str = "login-submit-indicator";
 
-type AuthState<Session, Id> = Arc<AuthSessionLayer<Session, Id>>;
-
-pub fn login_router<Session, Id>(auth_session: Arc<AuthSessionLayer<Session, Id>>) -> axum::Router
+pub fn login_router<Session>(auth_state: Arc<AuthSessionLayer<Session>>) -> axum::Router
 where
     Session: std::fmt::Debug + Sync + Send + 'static,
-    Id: std::fmt::Debug + Sync + Send + 'static,
 {
     axum::Router::new()
         .route("/login", get(login_page))
         .route(SUBMIT_PATH, post(login_submit))
-        .with_state(auth_session)
+        .with_state(auth_state)
 }
 
 /// Show the login page
@@ -68,19 +65,18 @@ struct LoginForm {
     pub username: String,
     pub password: String,
 }
-async fn login_submit<Session, Id>(
-    State(auth_session): State<AuthState<Session, Id>>,
+async fn login_submit<Session>(
+    State(auth_state): State<AuthState<Session>>,
     Form(form): Form<LoginForm>,
 ) -> (HeaderMap, Markup)
 where
     Session: std::fmt::Debug + Sync + Send + 'static,
-    Id: std::fmt::Debug + Sync + Send + 'static,
 {
     let cx = IdContext {
         username: &form.username,
         password: &form.password,
     };
-    let session_key = match auth_session.login(&cx).await {
+    let session_key = match auth_state.login(&cx).await {
         Ok(x) => x,
         Err(e) => {
             let markup = match e {

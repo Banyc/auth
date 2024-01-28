@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::async_trait;
 use rand::distributions::{Alphanumeric, DistString};
@@ -7,39 +7,33 @@ use tokio::sync::OwnedMutexGuard;
 
 const SESSION_KEY_LENGTH: usize = 16;
 
+pub type AuthState<Session> = Arc<AuthSessionLayer<Session>>;
+
 /// Authentication layer
 #[derive(Debug)]
-pub struct AuthSessionLayer<Session, Id> {
+pub struct AuthSessionLayer<Session> {
     session: MutSessionLayer<String, Session>,
-    id_source: Box<dyn IdSource<Id = Id>>,
-    init_session: Box<dyn InitSession<Id = Id, Session = Session>>,
+    init_session: Box<dyn InitSession<Session = Session>>,
 }
-impl<Session: Sync + Send + 'static, Id> AuthSessionLayer<Session, Id> {
-    pub fn new(
-        timeout: Duration,
-        id_source: impl IdSource<Id = Id>,
-        init_session: impl InitSession<Id = Id, Session = Session>,
-    ) -> Self {
+impl<Session: Sync + Send + 'static> AuthSessionLayer<Session> {
+    pub fn new(timeout: Duration, init_session: impl InitSession<Session = Session>) -> Self {
         Self {
             session: MutSessionLayer::new(timeout),
-            id_source: Box::new(id_source),
             init_session: Box::new(init_session),
         }
     }
 }
-impl<Session, Id> AuthSessionLayer<Session, Id>
+impl<Session> AuthSessionLayer<Session>
 where
     Session: std::fmt::Debug + Sync + Send + 'static,
-    Id: std::fmt::Debug + Sync + Send + 'static,
 {
     /// Initiate a session gated by authentication and return the session key
     pub async fn login(&self, id_context: &IdContext<'_>) -> Result<String, LoginError> {
-        let id = self
-            .id_source
-            .id(id_context)
+        let session = self
+            .init_session
+            .init_session(id_context)
             .await
             .ok_or(LoginError::WrongCreds)?;
-        let session = self.init_session.init_session(id);
         let session_key = Alphanumeric.sample_string(&mut rand::thread_rng(), SESSION_KEY_LENGTH);
         self.session
             .insert(session_key.clone(), session)
@@ -62,18 +56,10 @@ pub enum LoginError {
 }
 
 #[async_trait]
-pub trait IdSource: std::fmt::Debug + Sync + Send + 'static {
-    type Id;
-    /// Return [`None`] if the authentication failed
-    // fn id(&self, cx: &IdContext<'_>) -> impl std::future::Future<Output = Option<Self::Id>> + Send;
-    async fn id(&self, cx: &IdContext<'_>) -> Option<Self::Id>;
-}
-
 pub trait InitSession: std::fmt::Debug + Sync + Send + 'static {
-    type Id;
     type Session;
     // Generate a session based on a user ID
-    fn init_session(&self, id: Self::Id) -> Self::Session;
+    async fn init_session(&self, cx: &IdContext<'_>) -> Option<Self::Session>;
 }
 
 #[derive(Debug)]

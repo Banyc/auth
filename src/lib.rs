@@ -9,7 +9,7 @@ const SESSION_KEY_COOKIE_NAME: &str = "session-key";
 mod tests {
     use std::{collections::HashMap, sync::Arc, time::Duration};
 
-    use axum::{async_trait, routing::get, Router};
+    use axum::{async_trait, extract::FromRef, routing::get, Router};
     use htmx_util::base_html;
     use maud::{html, Markup};
     use tokio::net::TcpListener;
@@ -17,27 +17,26 @@ mod tests {
     use crate::{
         cookie::PulledSession,
         login::login_router,
-        session::{AuthSessionLayer, IdSource, InitSession},
+        session::{AuthSessionLayer, InitSession},
     };
 
-    use self::session::IdContext;
+    use self::session::{AuthState, IdContext};
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_on_web() {
-        let id_source = TestIdSource::new();
-        let init_session = TestInitSession;
-        let auth_session = Arc::new(AuthSessionLayer::new(
+        let init_session = TestInitSession::new();
+        let auth_state = Arc::new(AuthSessionLayer::new(
             Duration::from_secs(u64::MAX),
-            id_source,
             init_session,
         ));
-        let login_router = login_router(Arc::clone(&auth_session));
+        let login_router = login_router(Arc::clone(&auth_state));
+
         let router = Router::new()
             .route("/session", get(show_session))
-            .with_state(auth_session)
+            .with_state(auth_state)
             .nest("/", login_router);
         let listener = TcpListener::bind("127.0.0.1:6969")
             .await
@@ -58,6 +57,16 @@ mod tests {
         base_html(body)
     }
 
+    struct State {
+        auth: Arc<AuthSessionLayer<Session>>,
+    }
+
+    impl FromRef<State> for AuthState<Session> {
+        fn from_ref(input: &State) -> Self {
+            Arc::clone(&input.auth)
+        }
+    }
+
     #[derive(Debug)]
     struct Id {
         username: String,
@@ -67,14 +76,14 @@ mod tests {
         id: Id,
     }
 
-    /// Id Source with preset users for test
+    /// Create a `Session` based on the given user credential with preset users for test
     ///
     /// This can be a database handle in production
     #[derive(Debug)]
-    struct TestIdSource {
+    struct TestInitSession {
         users: HashMap<String, String>,
     }
-    impl TestIdSource {
+    impl TestInitSession {
         pub fn new() -> Self {
             let users = [("foo", "bar")]
                 .into_iter()
@@ -84,26 +93,16 @@ mod tests {
         }
     }
     #[async_trait]
-    impl IdSource for TestIdSource {
-        type Id = Id;
-        async fn id(&self, cx: &IdContext<'_>) -> Option<Self::Id> {
+    impl InitSession for TestInitSession {
+        type Session = Session;
+        async fn init_session(&self, cx: &IdContext<'_>) -> Option<Self::Session> {
             if self.users.get(cx.username)? != cx.password {
                 return None;
             }
-            Some(Id {
+            let id = Id {
                 username: cx.username.to_owned(),
-            })
-        }
-    }
-
-    /// Convert `Id` to `Session`
-    #[derive(Debug)]
-    struct TestInitSession;
-    impl InitSession for TestInitSession {
-        type Id = Id;
-        type Session = Session;
-        fn init_session(&self, id: Self::Id) -> Self::Session {
-            Session { id }
+            };
+            Some(Session { id })
         }
     }
 }

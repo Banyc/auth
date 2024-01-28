@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use axum::{
-    extract::FromRequestParts,
+    extract::{FromRef, FromRequestParts},
     http::{request::Parts, StatusCode},
     response::IntoResponse,
     RequestPartsExt,
@@ -11,20 +9,19 @@ use axum_extra::{headers::Cookie, TypedHeader};
 use maud::{html, Markup};
 use tokio::sync::OwnedMutexGuard;
 
-use crate::{session::AuthSessionLayer, SESSION_KEY_COOKIE_NAME};
+use crate::{session::AuthState, SESSION_KEY_COOKIE_NAME};
 
 pub struct PulledSession<Session>(pub OwnedMutexGuard<Session>);
 #[async_trait]
-impl<Session, Id> FromRequestParts<Arc<AuthSessionLayer<Session, Id>>> for PulledSession<Session>
+impl<Session, S> FromRequestParts<S> for PulledSession<Session>
 where
     Session: std::fmt::Debug + Sync + Send + 'static,
-    Id: std::fmt::Debug + Sync + Send + 'static,
+    S: Sync + Send,
+    AuthState<Session>: FromRef<S>,
 {
     type Rejection = AuthError;
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &Arc<AuthSessionLayer<Session, Id>>,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let state = AuthState::from_ref(state);
         let TypedHeader(cookie): TypedHeader<Cookie> =
             parts.extract().await.map_err(|_| AuthError::NoSessionKey)?;
         let session_key = cookie
