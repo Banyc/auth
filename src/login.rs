@@ -6,11 +6,11 @@ use axum::{
     routing::{get, post},
     Form,
 };
+use htmx_util::base_html;
 use maud::{html, Markup};
 use serde::Deserialize;
 
 use crate::{
-    htmx::base_html,
     session::{AuthSessionLayer, IdContext, LoginError},
     SESSION_KEY_COOKIE_NAME,
 };

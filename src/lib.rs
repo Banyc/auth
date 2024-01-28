@@ -1,5 +1,4 @@
 pub mod cookie;
-pub mod htmx;
 pub mod login;
 pub mod password;
 pub mod session;
@@ -11,6 +10,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use axum::{async_trait, routing::get, Router};
+    use htmx_util::base_html;
     use maud::{html, Markup};
     use tokio::net::TcpListener;
 
@@ -20,7 +20,7 @@ mod tests {
         session::{AuthSessionLayer, IdSource, InitSession},
     };
 
-    use self::{htmx::base_html, session::IdContext};
+    use self::session::IdContext;
 
     use super::*;
 

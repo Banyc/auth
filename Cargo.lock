@@ -86,6 +86,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "blake3",
+ "htmx_util",
  "maud",
  "rand",
  "ron",
@@ -660,6 +661,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3d1354bf6b7235cb4a0576c2619fd4ed18183f689b12b006a0ee7329eeff9a5"
 dependencies = [
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "htmx_util"
+version = "0.1.0"
+source = "git+https://github.com/Banyc/htmx_util.git?rev=3796508cb76dad103ce437369782140a0468f795#3796508cb76dad103ce437369782140a0468f795"
+dependencies = [
+ "maud",
 ]
 
 [[package]]
