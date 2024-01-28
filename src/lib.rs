@@ -1,4 +1,5 @@
 pub mod cookie;
+pub mod credential;
 pub mod htmx;
 pub mod login;
 pub mod session;
