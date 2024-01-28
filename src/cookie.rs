@@ -11,6 +11,7 @@ use tokio::sync::OwnedMutexGuard;
 
 use crate::{session::AuthState, SESSION_KEY_COOKIE_NAME};
 
+/// An extractor to help axum handlers receive a mutable session
 pub struct PulledSession<Session>(pub OwnedMutexGuard<Session>);
 #[async_trait]
 impl<Session, S> FromRequestParts<S> for PulledSession<Session>
@@ -58,4 +59,9 @@ fn error_page(msg: &str) -> Markup {
             p { (msg) }
         }
     }
+}
+
+/// Separate the sub-session from a global session so that libraries can focus only on the sub-session that they care about
+pub trait FromPulledSession<Session> {
+    fn from_mut(input: &mut PulledSession<Session>) -> &mut Self;
 }
