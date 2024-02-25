@@ -57,6 +57,11 @@ fn error_page(msg: &str) -> Markup {
         h1 { "Error" }
         body {
             p { (msg) }
+            p {
+                span { "You should log in " }
+                a href="/login" { "here" }
+                span { ", come back and reload this page." }
+            }
         }
     }
 }
