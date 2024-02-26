@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 axum = { version = "0.7", features = ["macros"] }
+axum-client-ip = "0.5"
 axum-extra = { version = "0.9", features = ["typed-header"] }
 blake3 = "1"
 htmx_util = { git = "https://github.com/Banyc/htmx_util.git", rev = "3796508cb76dad103ce437369782140a0468f795" }

@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Form,
 };
+use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use htmx_util::base_html;
 use maud::{html, Markup};
 use serde::Deserialize;
@@ -19,13 +20,17 @@ const ELEMENT_ID: &str = "login-form";
 const SUBMIT_PATH: &str = "/login-summit";
 const SUBMIT_INDICATOR_ID: &str = "login-submit-indicator";
 
-pub fn login_router<Session>(auth_state: Arc<AuthSessionLayer<Session>>) -> axum::Router
+pub fn login_router<Session>(
+    ip_source: SecureClientIpSource,
+    auth_state: Arc<AuthSessionLayer<Session>>,
+) -> axum::Router
 where
     Session: std::fmt::Debug + Sync + Send + 'static,
 {
     axum::Router::new()
         .route("/login", get(login_page))
         .route(SUBMIT_PATH, post(login_submit))
+        .layer(ip_source.into_extension())
         .with_state(auth_state)
 }
 
@@ -66,6 +71,7 @@ struct LoginForm {
     pub password: String,
 }
 async fn login_submit<Session>(
+    SecureClientIp(client_ip): SecureClientIp,
     State(auth_state): State<AuthState<Session>>,
     Form(form): Form<LoginForm>,
 ) -> (HeaderMap, Markup)
@@ -76,7 +82,7 @@ where
         username: &form.username,
         password: &form.password,
     };
-    let session_key = match auth_state.login(&cx).await {
+    let session_key = match auth_state.login(client_ip, &cx).await {
         Ok(x) => x,
         Err(e) => {
             let markup = match e {
@@ -84,6 +90,7 @@ where
                     login_form("Too many active users. Try again later.")
                 }
                 LoginError::WrongCreds => login_form("Wrong!"),
+                LoginError::TooManyAttempts => login_form("Banned!"),
             };
             return (HeaderMap::new(), markup);
         }

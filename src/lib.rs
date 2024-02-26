@@ -1,4 +1,5 @@
 pub mod cookie;
+pub mod expiring_hash_map;
 pub mod login;
 pub mod password;
 pub mod session;
@@ -7,9 +8,10 @@ const SESSION_KEY_COOKIE_NAME: &str = "session-key";
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc, time::Duration};
+    use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
     use axum::{async_trait, extract::FromRef, routing::get, Router};
+    use axum_client_ip::SecureClientIpSource;
     use htmx_util::base_html;
     use maud::{html, Markup};
     use tokio::net::TcpListener;
@@ -32,7 +34,8 @@ mod tests {
             Duration::from_secs(u64::MAX),
             init_session,
         ));
-        let login_router = login_router(Arc::clone(&auth_state));
+        let ip_source = SecureClientIpSource::ConnectInfo;
+        let login_router = login_router(ip_source, Arc::clone(&auth_state));
 
         let router = Router::new()
             .route("/session", get(show_session))
@@ -41,9 +44,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:6969")
             .await
             .expect("failed to bind");
-        axum::serve(listener, router)
-            .await
-            .expect("failed to serve");
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .expect("failed to serve");
     }
 
     async fn show_session(PulledSession(session): PulledSession<Session>) -> Markup {
