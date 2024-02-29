@@ -35,12 +35,13 @@ mod tests {
             init_session,
         ));
         let ip_source = SecureClientIpSource::ConnectInfo;
-        let login_router = login_router(ip_source, Arc::clone(&auth_state));
+        let login_router = login_router(ip_source.clone(), Arc::clone(&auth_state));
 
         let router = Router::new()
             .route("/session", get(show_session))
             .with_state(auth_state)
-            .nest("/", login_router);
+            .nest("/", login_router)
+            .layer(ip_source.into_extension());
         let listener = TcpListener::bind("127.0.0.1:6969")
             .await
             .expect("failed to bind");

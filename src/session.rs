@@ -20,14 +20,14 @@ pub type AuthState<Session> = Arc<AuthSessionLayer<Session>>;
 pub struct AuthSessionLayer<Session> {
     session: MutSessionLayer<String, Session>,
     init_session: Box<dyn InitSession<Session = Session>>,
-    login_attempts: Mutex<ExpiringHashMap<IpAddr, LoginAttempt>>,
+    failed_attempts: Mutex<ExpiringHashMap<IpAddr, LoginAttempt>>,
 }
 impl<Session: Sync + Send + 'static> AuthSessionLayer<Session> {
     pub fn new(timeout: Duration, init_session: impl InitSession<Session = Session>) -> Self {
         Self {
             session: MutSessionLayer::new(timeout),
             init_session: Box::new(init_session),
-            login_attempts: Mutex::new(ExpiringHashMap::new(Duration::from_secs(60 * 60))),
+            failed_attempts: Mutex::new(ExpiringHashMap::new(Duration::from_secs(60 * 60))),
         }
     }
 }
@@ -36,12 +36,22 @@ where
     Session: std::fmt::Debug + Sync + Send + 'static,
 {
     fn fail(&self, ip_addr: IpAddr) {
-        let mut login_attempts = self.login_attempts.lock().unwrap();
-        if login_attempts.get_mut(&ip_addr).is_none() {
-            login_attempts.insert(ip_addr, LoginAttempt::new());
+        let mut failed_attempts = self.failed_attempts.lock().unwrap();
+        if failed_attempts.get_mut(&ip_addr).is_none() {
+            failed_attempts.insert(ip_addr, LoginAttempt::new());
         }
-        let attempts = login_attempts.get_mut(&ip_addr).unwrap();
+        let attempts = failed_attempts.get_mut(&ip_addr).unwrap();
         attempts.fail();
+    }
+
+    fn banned(&self, ip_addr: IpAddr) -> bool {
+        let mut failed_attempts = self.failed_attempts.lock().unwrap();
+        if let Some(attempts) = failed_attempts.get(&ip_addr) {
+            if attempts.banned() {
+                return true;
+            }
+        }
+        false
     }
 
     /// Initiate a session gated by authentication and return the session key
@@ -50,13 +60,8 @@ where
         ip_addr: IpAddr,
         id_context: &IdContext<'_>,
     ) -> Result<String, LoginError> {
-        {
-            let mut login_attempts = self.login_attempts.lock().unwrap();
-            if let Some(attempts) = login_attempts.get(&ip_addr) {
-                if attempts.banned() {
-                    return Err(LoginError::TooManyAttempts);
-                }
-            }
+        if self.banned(ip_addr) {
+            return Err(LoginError::TooManyAttempts);
         }
         let session = self
             .init_session
@@ -73,8 +78,19 @@ where
         Ok(session_key)
     }
 
-    pub async fn get_mut(&self, session_key: &str) -> Option<OwnedMutexGuard<Session>> {
-        self.session.get_mut(session_key).await
+    pub async fn session_mut(
+        &self,
+        ip_addr: IpAddr,
+        session_key: &str,
+    ) -> Option<OwnedMutexGuard<Session>> {
+        if self.banned(ip_addr) {
+            return None;
+        }
+        let res = self.session.get_mut(session_key).await;
+        if res.is_none() {
+            self.fail(ip_addr);
+        }
+        res
     }
 }
 

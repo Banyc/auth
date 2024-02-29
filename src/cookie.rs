@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
     RequestPartsExt,
 };
+use axum_client_ip::SecureClientIp;
 use axum_extra::{headers::Cookie, TypedHeader};
 use maud::{html, Markup};
 use tokio::sync::OwnedMutexGuard;
@@ -23,13 +24,17 @@ where
     type Rejection = AuthError;
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let state = AuthState::from_ref(state);
+        let SecureClientIp(client_ip): SecureClientIp = parts
+            .extract()
+            .await
+            .map_err(|_| AuthError::NoClientIpAddr)?;
         let TypedHeader(cookie): TypedHeader<Cookie> =
             parts.extract().await.map_err(|_| AuthError::NoSessionKey)?;
         let session_key = cookie
             .get(SESSION_KEY_COOKIE_NAME)
             .ok_or(AuthError::NoSessionKey)?;
         let session = state
-            .get_mut(session_key)
+            .session_mut(client_ip, session_key)
             .await
             .ok_or(AuthError::SessionTimeout)?;
         Ok(Self(session))
@@ -40,12 +45,14 @@ where
 pub enum AuthError {
     NoSessionKey,
     SessionTimeout,
+    NoClientIpAddr,
 }
 impl IntoResponse for AuthError {
     fn into_response(self) -> axum::response::Response {
         let (status, msg) = match self {
             AuthError::NoSessionKey => (StatusCode::UNAUTHORIZED, "No session key"),
             AuthError::SessionTimeout => (StatusCode::UNAUTHORIZED, "Session timed out"),
+            AuthError::NoClientIpAddr => (StatusCode::UNAUTHORIZED, "No client IP address"),
         };
         let markup = error_page(msg);
         (status, markup).into_response()
