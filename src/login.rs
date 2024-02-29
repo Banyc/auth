@@ -12,6 +12,7 @@ use maud::{html, Markup};
 use serde::Deserialize;
 
 use crate::{
+    change_password::CHANGE_PASSWORD_URL,
     session::{AuthSessionLayer, AuthState, IdContext, LoginError},
     SESSION_KEY_COOKIE_NAME,
 };
@@ -97,6 +98,11 @@ where
     };
     let markup = html! {
         p { "You have logged in successfully!" }
+        p {
+            a href=(CHANGE_PASSWORD_URL) {
+                "Change your password"
+            }
+        }
     };
     let mut header = HeaderMap::new();
     header.insert(

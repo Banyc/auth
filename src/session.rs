@@ -6,28 +6,49 @@ use std::{
 
 use axum::async_trait;
 use rand::distributions::{Alphanumeric, DistString};
-use session::MutSessionLayer;
-use tokio::sync::OwnedMutexGuard;
+use session::SessionLayer;
+use tokio::sync::Mutex as TokioMutex;
 
 use crate::expiring_hash_map::ExpiringHashMap;
 
 const SESSION_KEY_LENGTH: usize = 16;
 
 pub type AuthState<Session> = Arc<AuthSessionLayer<Session>>;
+pub type Username = Arc<str>;
+
+#[derive(Debug)]
+pub struct AuthLayerSession<Session> {
+    pub username: Username,
+    pub user_session: Arc<TokioMutex<Session>>,
+}
+impl<Session> Clone for AuthLayerSession<Session> {
+    fn clone(&self) -> Self {
+        Self {
+            username: self.username.clone(),
+            user_session: self.user_session.clone(),
+        }
+    }
+}
 
 /// Authentication layer
 #[derive(Debug)]
 pub struct AuthSessionLayer<Session> {
-    session: MutSessionLayer<String, Session>,
+    session: Arc<SessionLayer<String, AuthLayerSession<Session>>>,
     init_session: Box<dyn InitSession<Session = Session>>,
     failed_attempts: Mutex<ExpiringHashMap<IpAddr, LoginAttempt>>,
+    change_password: Box<dyn ChangePassword>,
 }
 impl<Session: Sync + Send + 'static> AuthSessionLayer<Session> {
-    pub fn new(timeout: Duration, init_session: impl InitSession<Session = Session>) -> Self {
+    pub fn new(
+        timeout: Duration,
+        init_session: impl InitSession<Session = Session>,
+        change_password: impl ChangePassword,
+    ) -> Self {
         Self {
-            session: MutSessionLayer::new(timeout),
+            session: SessionLayer::new(timeout),
             init_session: Box::new(init_session),
             failed_attempts: Mutex::new(ExpiringHashMap::new(Duration::from_secs(60 * 60))),
+            change_password: Box::new(change_password),
         }
     }
 }
@@ -73,21 +94,43 @@ where
             })?;
         let session_key = Alphanumeric.sample_string(&mut rand::thread_rng(), SESSION_KEY_LENGTH);
         self.session
-            .insert(session_key.clone(), session)
+            .insert(
+                session_key.clone(),
+                AuthLayerSession {
+                    username: id_context.username.into(),
+                    user_session: Arc::new(TokioMutex::new(session)),
+                },
+            )
             .map_err(|_| LoginError::SessionCollision)?;
         Ok(session_key)
     }
 
-    pub async fn session_mut(
+    pub async fn layer_session(
         &self,
         ip_addr: IpAddr,
         session_key: &str,
-    ) -> Option<OwnedMutexGuard<Session>> {
+    ) -> Option<AuthLayerSession<Session>> {
         if self.banned(ip_addr) {
             return None;
         }
-        let res = self.session.get_mut(session_key).await;
+        let res = self.session.get(session_key);
         if res.is_none() {
+            self.fail(ip_addr);
+        }
+        res
+    }
+
+    pub async fn change_password(
+        &self,
+        ip_addr: IpAddr,
+        username: &str,
+        change_password_cx: &ChangePasswordContext<'_>,
+    ) -> Result<(), &'static str> {
+        let res = self
+            .change_password
+            .change_password(username, change_password_cx)
+            .await;
+        if res.is_err() {
             self.fail(ip_addr);
         }
         res
@@ -140,4 +183,19 @@ pub trait InitSession: std::fmt::Debug + Sync + Send + 'static {
 pub struct IdContext<'caller> {
     pub username: &'caller str,
     pub password: &'caller str,
+}
+
+#[async_trait]
+pub trait ChangePassword: std::fmt::Debug + Sync + Send + 'static {
+    async fn change_password(
+        &self,
+        username: &str,
+        cx: &ChangePasswordContext<'_>,
+    ) -> Result<(), &'static str>;
+}
+
+#[derive(Debug)]
+pub struct ChangePasswordContext<'caller> {
+    pub old_password: &'caller str,
+    pub new_password: &'caller str,
 }
