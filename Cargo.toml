@@ -11,7 +11,7 @@ axum = { version = "0.7", features = ["macros"] }
 axum-client-ip = "0.5"
 axum-extra = { version = "0.9", features = ["typed-header"] }
 blake3 = "1"
-expiring_hash_map = { git = "https://github.com/Banyc/expiring_hash_map.git", rev = "5d23d32d8f26a7fd763986cb26e5793d63c04e6e" }
+expiring_hash_map = { git = "https://github.com/Banyc/expiring_hash_map.git", rev = "c9711c697dd278b4aef9ac56884f7061c7bad6db" }
 htmx_util = { git = "https://github.com/Banyc/htmx_util.git", rev = "3796508cb76dad103ce437369782140a0468f795" }
 maud = { version = "0.26", features = ["axum"] }
 rand = "0.8"

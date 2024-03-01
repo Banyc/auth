@@ -428,7 +428,7 @@ checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 [[package]]
 name = "expiring_hash_map"
 version = "0.1.0"
-source = "git+https://github.com/Banyc/expiring_hash_map.git?rev=5d23d32d8f26a7fd763986cb26e5793d63c04e6e#5d23d32d8f26a7fd763986cb26e5793d63c04e6e"
+source = "git+https://github.com/Banyc/expiring_hash_map.git?rev=c9711c697dd278b4aef9ac56884f7061c7bad6db#c9711c697dd278b4aef9ac56884f7061c7bad6db"
 
 [[package]]
 name = "fastrand"
