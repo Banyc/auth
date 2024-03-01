@@ -6,7 +6,6 @@ use login::login_router;
 use session::AuthSessionLayer;
 
 pub mod change_password;
-pub mod expiring_hash_map;
 pub mod login;
 pub mod password;
 pub mod req;

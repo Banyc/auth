@@ -6,10 +6,9 @@ use std::{
 
 use axum::async_trait;
 use rand::distributions::{Alphanumeric, DistString};
-use session::SessionLayer;
 use tokio::sync::Mutex as TokioMutex;
 
-use crate::expiring_hash_map::ExpiringHashMap;
+use expiring_hash_map::ExpiringHashMap;
 
 const SESSION_KEY_LENGTH: usize = 16;
 
@@ -30,10 +29,12 @@ impl<Session> Clone for AuthLayerSession<Session> {
     }
 }
 
+type SessionLayer<Session> = ExpiringHashMap<String, AuthLayerSession<Session>>;
+
 /// Authentication layer
 #[derive(Debug)]
 pub struct AuthSessionLayer<Session> {
-    session: Arc<SessionLayer<String, AuthLayerSession<Session>>>,
+    session: Mutex<SessionLayer<Session>>,
     init_session: Box<dyn InitSession<Session = Session>>,
     failed_attempts: Mutex<ExpiringHashMap<IpAddr, LoginAttempt>>,
     change_password: Box<dyn ChangePassword>,
@@ -45,7 +46,7 @@ impl<Session: Sync + Send + 'static> AuthSessionLayer<Session> {
         change_password: impl ChangePassword,
     ) -> Self {
         Self {
-            session: SessionLayer::new(timeout),
+            session: Mutex::new(SessionLayer::new(timeout)),
             init_session: Box::new(init_session),
             failed_attempts: Mutex::new(ExpiringHashMap::new(Duration::from_secs(60 * 60))),
             change_password: Box::new(change_password),
@@ -84,7 +85,7 @@ where
         if self.banned(ip_addr) {
             return Err(LoginError::TooManyAttempts);
         }
-        let session = self
+        let user_session = self
             .init_session
             .init_session(id_context)
             .await
@@ -93,15 +94,19 @@ where
                 LoginError::WrongCreds
             })?;
         let session_key = Alphanumeric.sample_string(&mut rand::thread_rng(), SESSION_KEY_LENGTH);
-        self.session
-            .insert(
+        {
+            let mut session = self.session.lock().unwrap();
+            if session.get(&session_key).is_some() {
+                return Err(LoginError::SessionCollision);
+            }
+            session.insert(
                 session_key.clone(),
                 AuthLayerSession {
                     username: id_context.username.into(),
-                    user_session: Arc::new(TokioMutex::new(session)),
+                    user_session: Arc::new(TokioMutex::new(user_session)),
                 },
-            )
-            .map_err(|_| LoginError::SessionCollision)?;
+            );
+        }
         Ok(session_key)
     }
 
@@ -113,7 +118,10 @@ where
         if self.banned(ip_addr) {
             return None;
         }
-        let res = self.session.get(session_key);
+        let res = {
+            let mut session = self.session.lock().unwrap();
+            session.get(session_key).cloned()
+        };
         if res.is_none() {
             self.fail(ip_addr);
         }
