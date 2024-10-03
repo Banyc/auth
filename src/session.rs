@@ -26,9 +26,16 @@ impl<Session> Clone for AuthSession<Session> {
 
 type SessionLayer<Session> = ExpiringHashMap<String, AuthSession<Session>>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AuthSessionLayerHandler<Session> {
     tx: tokio::sync::mpsc::Sender<AuthSessionLayerMessage<Session>>,
+}
+impl<Session> Clone for AuthSessionLayerHandler<Session> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+        }
+    }
 }
 impl<Session: Sync + Send + 'static> AuthSessionLayerHandler<Session> {
     pub fn new(mut layer: AuthSessionLayer<Session>) -> Self {
