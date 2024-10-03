@@ -1,47 +1,22 @@
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    routing::{get, post},
-    Form,
-};
-use axum_client_ip::{SecureClientIp, SecureClientIpSource};
-use htmx_util::base_html;
+use http::HeaderMap;
 use maud::{html, Markup};
 use serde::Deserialize;
+use tokio::sync::oneshot;
 
 use crate::{
-    change_password::CHANGE_PASSWORD_URL,
-    session::{AuthSessionLayer, AuthState, IdContext, LoginError},
+    referred_id,
+    session::{AuthSessionLayerHandler, AuthSessionLayerMessage, BasicCredential},
     SESSION_KEY_COOKIE_NAME,
 };
 
+pub const LOGIN_PAGE_LINK: &str = "/login";
+pub const LOGIN_SUBMIT_LINK: &str = "/login/summit";
 const ELEMENT_ID: &str = "login-form";
-const SUBMIT_PATH: &str = "/login-summit";
 const SUBMIT_INDICATOR_ID: &str = "login-submit-indicator";
 
-pub fn login_router<Session>(
-    ip_source: SecureClientIpSource,
-    auth_state: Arc<AuthSessionLayer<Session>>,
-) -> axum::Router
-where
-    Session: std::fmt::Debug + Sync + Send + 'static,
-{
-    axum::Router::new()
-        .route("/login", get(login_page))
-        .route(SUBMIT_PATH, post(login_submit))
-        .layer(ip_source.into_extension())
-        .with_state(auth_state)
-}
-
-/// Show the login page
-async fn login_page() -> Markup {
-    let form = login_form("");
-    base_html(form)
-}
-
-fn login_form(err_msg: &str) -> Markup {
+pub fn login_form(err_msg: &str, submit_link: &str) -> Markup {
     html! {
         div id=(ELEMENT_ID) {
             form {
@@ -52,7 +27,7 @@ fn login_form(err_msg: &str) -> Markup {
                 br {}
                 button hx-target=(referred_id(ELEMENT_ID))
                     hx-trigger="click"
-                    hx-post=(SUBMIT_PATH)
+                    hx-post=(submit_link)
                     hx-indicator=(referred_id(SUBMIT_INDICATOR_ID))
                     { "Submit" }
             }
@@ -67,53 +42,54 @@ fn login_form(err_msg: &str) -> Markup {
 }
 
 #[derive(Deserialize)]
-struct LoginForm {
-    pub username: String,
-    pub password: String,
-}
-async fn login_submit<Session>(
-    SecureClientIp(client_ip): SecureClientIp,
-    State(auth_state): State<AuthState<Session>>,
-    Form(form): Form<LoginForm>,
-) -> (HeaderMap, Markup)
-where
-    Session: std::fmt::Debug + Sync + Send + 'static,
-{
-    let cx = IdContext {
-        username: &form.username,
-        password: &form.password,
-    };
-    let session_key = match auth_state.login(client_ip, &cx).await {
-        Ok(x) => x,
-        Err(e) => {
-            let markup = match e {
-                LoginError::SessionCollision => {
-                    login_form("Too many active users. Try again later.")
-                }
-                LoginError::WrongCreds => login_form("Wrong!"),
-                LoginError::TooManyAttempts => login_form("Banned!"),
-            };
-            return (HeaderMap::new(), markup);
-        }
-    };
-    let markup = html! {
-        p { "You have logged in successfully!" }
-        p {
-            a href=(CHANGE_PASSWORD_URL) {
-                "Change your password"
-            }
-        }
-    };
-    let mut header = HeaderMap::new();
-    header.insert(
-        "Set-Cookie",
-        format!("{SESSION_KEY_COOKIE_NAME}={session_key}; SameSite=None; Secure")
-            .parse()
-            .unwrap(),
-    );
-    (header, markup)
+pub struct LoginForm {
+    pub username: Arc<str>,
+    pub password: Arc<str>,
 }
 
-fn referred_id(id: &str) -> String {
-    format!("#{id}")
+#[bon::builder]
+pub async fn login_submit<Session: Sync + Send + 'static>(
+    ip_addr: Option<IpAddr>,
+    form: &LoginForm,
+    state: &AuthSessionLayerHandler<Session>,
+    login_submit_link: &str,
+    change_password_link: &str,
+    f: Box<dyn FnOnce() -> Session + Send>,
+) -> (HeaderMap, Markup) {
+    let credential = BasicCredential {
+        username: form.username.clone(),
+        password: form.password.clone(),
+    };
+    let (tx, rx) = oneshot::channel();
+    state
+        .request(AuthSessionLayerMessage::Login {
+            req: (ip_addr, credential, f),
+            resp: tx,
+        })
+        .await;
+    let resp = rx.await.unwrap();
+    match resp {
+        Ok(session_key) => {
+            let markup = html! {
+                p { "You have logged in successfully!" }
+                p {
+                    a href=(change_password_link) {
+                        "Change your password"
+                    }
+                }
+            };
+            let mut header = HeaderMap::new();
+            header.insert(
+                "Set-Cookie",
+                format!("{SESSION_KEY_COOKIE_NAME}={session_key}; SameSite=None; Secure; Path=/")
+                    .parse()
+                    .unwrap(),
+            );
+            (header, markup)
+        }
+        Err(e) => (
+            HeaderMap::new(),
+            login_form(&format!("{e}"), login_submit_link),
+        ),
+    }
 }

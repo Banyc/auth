@@ -1,169 +1,185 @@
-use std::sync::Arc;
-
-use axum_client_ip::SecureClientIpSource;
-use change_password::change_password_router;
-use login::login_router;
-use session::AuthSessionLayer;
-
 pub mod change_password;
 pub mod login;
 pub mod password;
 pub mod req;
 pub mod session;
 
-const SESSION_KEY_COOKIE_NAME: &str = "session-key";
+pub const SESSION_KEY_COOKIE_NAME: &str = "auth-session-key";
 
-pub fn auth_router<Session>(
-    ip_source: SecureClientIpSource,
-    auth_state: Arc<AuthSessionLayer<Session>>,
-) -> axum::Router
-where
-    Session: std::fmt::Debug + Sync + Send + 'static,
-{
-    axum::Router::new()
-        .nest("/", login_router(ip_source.clone(), auth_state.clone()))
-        .nest(
-            "/",
-            change_password_router(ip_source.clone(), auth_state.clone()),
-        )
+fn referred_id(id: &str) -> String {
+    format!("#{id}")
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, net::SocketAddr, sync::Mutex, time::Duration};
+    use std::{collections::HashMap, sync::Arc, time::Duration};
 
-    use axum::{async_trait, extract::FromRef, routing::get, Router};
+    use async_trait::async_trait;
+    use axum::{
+        debug_handler,
+        extract::State,
+        response::Html,
+        routing::{get, post},
+        Form, Router,
+    };
+    use change_password::{
+        change_password_form, change_password_submit, ChangeForm, CHANGE_PASSWORD_PAGE_LINK,
+        CHANGE_PASSWORD_SUBMIT_LINK,
+    };
     use htmx_util::base_html;
-    use maud::{html, Markup};
+    use http::HeaderMap;
+    use login::{login_form, login_submit, LoginForm, LOGIN_PAGE_LINK, LOGIN_SUBMIT_LINK};
+    use maud::html;
+    use req::auth;
+    use session::{AuthSessionLayer, AuthSessionLayerHandler, UserLayer};
     use tokio::net::TcpListener;
 
-    use crate::{req::AuthSession, session::InitSession};
-
-    use self::session::{AuthState, ChangePassword, ChangePasswordContext, IdContext};
+    use self::session::{BasicCredential, PasswordChangeReq};
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_on_web() {
-        let users = Arc::new(Mutex::new(HashMap::new()));
-        let init_session = TestInitSession::new(users.clone());
-        let change_password = TestChangePassword::new(users);
-        let auth_state = Arc::new(AuthSessionLayer::new(
-            Duration::from_secs(u64::MAX),
-            init_session,
-            change_password,
-        ));
-        let ip_source = SecureClientIpSource::ConnectInfo;
-        let auth_router = auth_router(ip_source.clone(), Arc::clone(&auth_state));
-
+        let user_layer = TestUserLayer::new(HashMap::new());
+        let auth_state = AuthSessionLayer::new(Duration::from_secs(u64::MAX), Box::new(user_layer));
+        let auth_state = AuthSessionLayerHandler::new(auth_state);
+        let state = AppState { auth: auth_state };
+        let state = Arc::new(state);
+        let auth_router = Router::new()
+            .route(LOGIN_PAGE_LINK, get(login_page))
+            .route(LOGIN_SUBMIT_LINK, post(login_submit_api))
+            .route(CHANGE_PASSWORD_PAGE_LINK, get(change_password_page))
+            .route(
+                CHANGE_PASSWORD_SUBMIT_LINK,
+                post(change_password_submit_api),
+            )
+            .with_state(state.clone());
         let router = Router::new()
             .route("/session", get(show_session))
-            .with_state(auth_state)
-            .nest("/", auth_router)
-            .layer(ip_source.into_extension());
+            .with_state(state)
+            .nest("/", auth_router);
         let listener = TcpListener::bind("127.0.0.1:6969")
             .await
             .expect("failed to bind");
-        axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
-        .expect("failed to serve");
+        axum::serve(listener, router)
+            .await
+            .expect("failed to serve");
     }
 
-    async fn show_session(AuthSession(session): AuthSession<Session>) -> Markup {
+    async fn change_password_page(headers: HeaderMap, state: State<Arc<AppState>>) -> Html<String> {
+        if let Err(e) = auth(&headers, &state.auth, LOGIN_SUBMIT_LINK).await {
+            return Html(e.into_string());
+        }
+        Html(base_html(change_password_form("", CHANGE_PASSWORD_SUBMIT_LINK)).into_string())
+    }
+    async fn change_password_submit_api(
+        headers: HeaderMap,
+        state: State<Arc<AppState>>,
+        form: Form<ChangeForm>,
+    ) -> Html<String> {
+        let session = match auth(&headers, &state.auth, LOGIN_SUBMIT_LINK).await {
+            Ok(x) => x,
+            Err(e) => {
+                return Html(e.into_string());
+            }
+        };
+        let html = change_password_submit()
+            .form(&form.0)
+            .state(&state.auth)
+            .change_password_link(CHANGE_PASSWORD_PAGE_LINK)
+            .change_password_submit_link(CHANGE_PASSWORD_SUBMIT_LINK)
+            .username(session.username)
+            .call()
+            .await;
+        Html(html.into_string())
+    }
+    async fn login_page() -> Html<String> {
+        Html(base_html(login_form("", LOGIN_SUBMIT_LINK)).into_string())
+    }
+    async fn login_submit_api(
+        state: State<Arc<AppState>>,
+        form: Form<LoginForm>,
+    ) -> (HeaderMap, Html<String>) {
+        let username = form.username.clone();
+        let f = move || Session {
+            id: Id { username },
+        };
+        let (headers, html) = login_submit()
+            .form(&form.0)
+            .state(&state.auth)
+            .change_password_link(CHANGE_PASSWORD_PAGE_LINK)
+            .login_submit_link(LOGIN_SUBMIT_LINK)
+            .f(Box::new(f))
+            .call()
+            .await;
+        (headers, Html(html.into_string()))
+    }
+    #[debug_handler]
+    async fn show_session(headers: HeaderMap, state: State<Arc<AppState>>) -> Html<String> {
+        let session = match auth(&headers, &state.auth, LOGIN_SUBMIT_LINK).await {
+            Ok(x) => x,
+            Err(e) => {
+                return Html(e.into_string());
+            }
+        };
+        let username = session.user_session.id.username.to_string();
         let body = html! {
             h1 { "Session" }
             p {
                 span { "Username: " }
-                span { (session.id.username) }
+                span { (username) }
             }
         };
-        base_html(body)
+        Html(base_html(body).into_string())
     }
 
-    struct State {
-        auth: Arc<AuthSessionLayer<Session>>,
-    }
-
-    impl FromRef<State> for AuthState<Session> {
-        fn from_ref(input: &State) -> Self {
-            Arc::clone(&input.auth)
-        }
+    struct AppState {
+        auth: AuthSessionLayerHandler<Session>,
     }
 
     #[derive(Debug)]
     struct Id {
-        username: String,
+        pub username: Arc<str>,
     }
     #[derive(Debug)]
     struct Session {
-        id: Id,
+        pub id: Id,
     }
 
     /// Create a `Session` based on the given user credential with preset users for test
     ///
     /// This can be a database handle in production
     #[derive(Debug)]
-    struct TestInitSession {
-        users: Arc<Mutex<HashMap<String, String>>>,
+    struct TestUserLayer {
+        users: HashMap<String, String>,
     }
-    impl TestInitSession {
-        pub fn new(users: Arc<Mutex<HashMap<String, String>>>) -> Self {
-            {
-                let mut u = users.lock().unwrap();
-                let new_users = [("foo", "bar")]
-                    .into_iter()
-                    .map(|(u, p)| (u.to_owned(), p.to_owned()));
-                u.extend(new_users);
-            }
+    impl TestUserLayer {
+        pub fn new(mut users: HashMap<String, String>) -> Self {
+            let new_users = [("foo", "bar")]
+                .into_iter()
+                .map(|(u, p)| (u.to_owned(), p.to_owned()));
+            users.extend(new_users);
             Self { users }
         }
     }
     #[async_trait]
-    impl InitSession for TestInitSession {
-        type Session = Session;
-        async fn init_session(&self, cx: &IdContext<'_>) -> Option<Self::Session> {
-            let users = self.users.lock().unwrap();
-            if users.get(cx.username)? != cx.password {
-                return None;
-            }
-            let id = Id {
-                username: cx.username.to_owned(),
+    impl UserLayer for TestUserLayer {
+        /// `true`: auth successful
+        async fn auth(&mut self, cx: &BasicCredential) -> bool {
+            let Some(password) = self.users.get(cx.username.as_ref()) else {
+                return false;
             };
-            Some(Session { id })
+            password == cx.password.as_ref()
         }
-    }
-
-    /// Change password of a user
-    ///
-    /// This can be a database operation
-    #[derive(Debug)]
-    struct TestChangePassword {
-        users: Arc<Mutex<HashMap<String, String>>>,
-    }
-    impl TestChangePassword {
-        pub fn new(users: Arc<Mutex<HashMap<String, String>>>) -> Self {
-            Self { users }
-        }
-    }
-    #[async_trait]
-    impl ChangePassword for TestChangePassword {
-        async fn change_password(
-            &self,
-            username: &str,
-            cx: &ChangePasswordContext<'_>,
-        ) -> Result<(), &'static str> {
-            let mut u = self.users.lock().unwrap();
-            let Some(p) = u.get_mut(username) else {
+        async fn change_password(&mut self, args: &PasswordChangeReq) -> Result<(), &'static str> {
+            let Some(p) = self.users.get_mut(args.credential.username.as_ref()) else {
                 return Err("User not exists");
             };
-            if p != cx.old_password {
+            if p != args.credential.password.as_ref() {
                 return Err("Wrong old password");
             }
-            *p = cx.new_password.into();
+            *p = args.new_password.to_string();
             Ok(())
         }
     }

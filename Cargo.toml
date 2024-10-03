@@ -7,18 +7,19 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-axum = { version = "0.7", features = ["macros"] }
-axum-client-ip = "0.5"
-axum-extra = { version = "0.9", features = ["typed-header"] }
 blake3 = "1"
-expiring_hash_map = { git = "https://github.com/Banyc/expiring_hash_map.git", rev = "c9711c697dd278b4aef9ac56884f7061c7bad6db" }
+bon = "2"
+headers = "0.4"
 htmx_util = { git = "https://github.com/Banyc/htmx_util.git", rev = "3796508cb76dad103ce437369782140a0468f795" }
-maud = { version = "0.26", features = ["axum"] }
+http = "1"
+maud = { version = "0.26" }
+primitive = { git = "https://github.com/Banyc/primitive.git", tag = "v0.0.24" }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+axum = { version = "0.7", features = ["macros"] }
 ron = "0.8"
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
