@@ -15,12 +15,27 @@ use crate::{
 
 pub async fn auth<Session: Sync + Send + 'static>(
     headers: &HeaderMap,
+    client_ip: Option<IpAddr>,
     layer: &AuthSessionLayerHandler<Session>,
     login_submit_link: &str,
 ) -> Result<AuthSession<Session>, Markup> {
-    auth2_(headers, layer)
+    auth2_(headers, client_ip, layer)
         .await
         .map_err(|e| base_html(login_form(&format!("{e}"), login_submit_link)))
+}
+async fn auth2_<Session: Sync + Send + 'static>(
+    headers: &HeaderMap,
+    client_ip: Option<IpAddr>,
+    layer: &AuthSessionLayerHandler<Session>,
+) -> Result<AuthSession<Session>, AuthError> {
+    let cookie = headers
+        .typed_get::<Cookie>()
+        .ok_or(AuthError::NoSessionKey)?;
+    let session_key = cookie
+        .get(SESSION_KEY_COOKIE_NAME)
+        .ok_or(AuthError::NoSessionKey)?;
+
+    auth1_(client_ip, Some(session_key.into()), layer).await
 }
 async fn auth1_<Session: Sync + Send + 'static>(
     client_ip: Option<IpAddr>,
@@ -37,18 +52,6 @@ async fn auth1_<Session: Sync + Send + 'static>(
         .await;
     let session = rx.await.unwrap().ok_or(AuthError::SessionTimeout)?;
     Ok(session)
-}
-async fn auth2_<Session: Sync + Send + 'static>(
-    headers: &HeaderMap,
-    layer: &AuthSessionLayerHandler<Session>,
-) -> Result<AuthSession<Session>, AuthError> {
-    let cookie = headers
-        .typed_get::<Cookie>()
-        .ok_or(AuthError::NoSessionKey)?;
-    let session_key = cookie
-        .get(SESSION_KEY_COOKIE_NAME)
-        .ok_or(AuthError::NoSessionKey)?;
-    auth1_(None, Some(session_key.into()), layer).await
 }
 
 #[derive(Debug, Error)]

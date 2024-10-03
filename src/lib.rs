@@ -68,7 +68,7 @@ mod tests {
     }
 
     async fn change_password_page(headers: HeaderMap, state: State<Arc<AppState>>) -> Html<String> {
-        if let Err(e) = auth(&headers, &state.auth, LOGIN_SUBMIT_LINK).await {
+        if let Err(e) = auth(&headers, None, &state.auth, LOGIN_SUBMIT_LINK).await {
             return Html(e.into_string());
         }
         Html(base_html(change_password_form("", CHANGE_PASSWORD_SUBMIT_LINK)).into_string())
@@ -78,7 +78,7 @@ mod tests {
         state: State<Arc<AppState>>,
         form: Form<ChangeForm>,
     ) -> Html<String> {
-        let session = match auth(&headers, &state.auth, LOGIN_SUBMIT_LINK).await {
+        let session = match auth(&headers, None, &state.auth, LOGIN_SUBMIT_LINK).await {
             Ok(x) => x,
             Err(e) => {
                 return Html(e.into_string());
@@ -117,7 +117,7 @@ mod tests {
     }
     #[debug_handler]
     async fn show_session(headers: HeaderMap, state: State<Arc<AppState>>) -> Html<String> {
-        let session = match auth(&headers, &state.auth, LOGIN_SUBMIT_LINK).await {
+        let session = match auth(&headers, None, &state.auth, LOGIN_SUBMIT_LINK).await {
             Ok(x) => x,
             Err(e) => {
                 return Html(e.into_string());
