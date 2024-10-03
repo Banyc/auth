@@ -1,6 +1,5 @@
 pub mod change_password;
 pub mod login;
-pub mod password;
 pub mod req;
 pub mod session;
 
