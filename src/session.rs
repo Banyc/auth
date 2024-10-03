@@ -5,7 +5,7 @@ use primitive::map::expiring_map::ExpiringHashMap;
 use rand::distributions::{Alphanumeric, DistString};
 use tokio::sync::{mpsc, oneshot};
 
-const SESSION_KEY_LENGTH: usize = 16;
+const SESSION_KEY_LENGTH: usize = 64;
 
 pub type AuthState<Session> = Arc<AuthSessionLayer<Session>>;
 pub type Username = Arc<str>;
