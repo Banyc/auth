@@ -37,7 +37,9 @@ impl<Session: Sync + Send + 'static> AuthSessionLayerHandler<Session> {
             while let Some(msg) = rx.recv().await {
                 match msg {
                     AuthSessionLayerMessage::Login { req, resp } => {
-                        let res = layer.login(req.0, &req.1, req.2).await;
+                        let username = req.1.username.clone();
+                        let f = || (req.2)(username);
+                        let res = layer.login(req.0, &req.1, f).await;
                         let _ = resp.send(res);
                     }
                     AuthSessionLayerMessage::ChangePassword { req, resp } => {
@@ -60,11 +62,8 @@ impl<Session: Sync + Send + 'static> AuthSessionLayerHandler<Session> {
 }
 pub enum AuthSessionLayerMessage<Session> {
     Login {
-        req: (
-            Option<IpAddr>,
-            BasicCredential,
-            Box<dyn FnOnce() -> Session + Send>,
-        ),
+        #[allow(clippy::type_complexity)]
+        req: (Option<IpAddr>, BasicCredential, fn(Arc<str>) -> Session),
         resp: oneshot::Sender<Result<String, LoginError>>,
     },
     ChangePassword {

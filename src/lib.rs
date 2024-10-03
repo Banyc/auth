@@ -101,8 +101,7 @@ mod tests {
         state: State<Arc<AppState>>,
         form: Form<LoginForm>,
     ) -> (HeaderMap, Html<String>) {
-        let username = form.username.clone();
-        let f = move || Session {
+        let f = |username| Session {
             id: Id { username },
         };
         let (headers, html) = login_submit()
@@ -110,7 +109,7 @@ mod tests {
             .state(&state.auth)
             .change_password_link(CHANGE_PASSWORD_PAGE_LINK)
             .login_submit_link(LOGIN_SUBMIT_LINK)
-            .f(Box::new(f))
+            .f(f)
             .call()
             .await;
         (headers, Html(html.into_string()))

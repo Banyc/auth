@@ -54,7 +54,7 @@ pub async fn login_submit<Session: Sync + Send + 'static>(
     state: &AuthSessionLayerHandler<Session>,
     login_submit_link: &str,
     change_password_link: &str,
-    f: Box<dyn FnOnce() -> Session + Send>,
+    f: fn(Arc<str>) -> Session,
 ) -> (HeaderMap, Markup) {
     let credential = BasicCredential {
         username: form.username.clone(),
