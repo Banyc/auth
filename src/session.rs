@@ -83,40 +83,53 @@ pub enum AuthSessionLayerMessage<Session> {
     },
 }
 
-/// Authentication layer
 #[derive(Debug)]
-pub struct AuthSessionLayer<Session> {
-    session: SessionLayer<Session>,
-    failed_attempts: ExpiringHashMap<IpAddr, LoginAttempt>,
-    user_layer: Box<dyn UserLayer>,
+struct ExpiringAttemptMap<K> {
+    map: ExpiringHashMap<K, LoginAttempt>,
 }
-impl<Session: Sync + Send + 'static> AuthSessionLayer<Session> {
-    pub fn new(timeout: Duration, user_layer: Box<dyn UserLayer>) -> Self {
+impl<K: Eq + core::hash::Hash + Clone> ExpiringAttemptMap<K> {
+    pub fn new(duration: Duration) -> Self {
         Self {
-            session: SessionLayer::new(timeout),
-            failed_attempts: ExpiringHashMap::new(Duration::from_secs(60 * 60)),
-            user_layer,
+            map: ExpiringHashMap::new(duration),
         }
     }
-}
-impl<Session: 'static> AuthSessionLayer<Session> {
-    fn fail(&mut self, ip_addr: IpAddr) {
-        if self.failed_attempts.get_mut(&ip_addr).is_none() {
-            self.failed_attempts.insert(ip_addr, LoginAttempt::new());
+    pub fn fail(&mut self, key: &K) {
+        if self.map.get_mut(key).is_none() {
+            self.map.insert(key.clone(), LoginAttempt::new());
         }
-        let attempts = self.failed_attempts.get_mut(&ip_addr).unwrap();
-        attempts.fail();
+        if let Some(attempts) = self.map.get_mut(key) {
+            attempts.fail();
+        }
     }
-
-    fn banned(&mut self, ip_addr: IpAddr) -> bool {
-        if let Some(attempts) = self.failed_attempts.get(&ip_addr) {
+    pub fn is_banned(&mut self, key: &K) -> bool {
+        if let Some(attempts) = self.map.get(key) {
             if attempts.banned() {
                 return true;
             }
         }
         false
     }
+}
 
+/// Authentication layer
+#[derive(Debug)]
+pub struct AuthSessionLayer<Session> {
+    session: SessionLayer<Session>,
+    ip_attempts: ExpiringAttemptMap<IpAddr>,
+    username_attempts: ExpiringAttemptMap<Arc<str>>,
+    user_layer: Box<dyn UserLayer>,
+}
+impl<Session: Sync + Send + 'static> AuthSessionLayer<Session> {
+    pub fn new(timeout: Duration, user_layer: Box<dyn UserLayer>) -> Self {
+        Self {
+            session: SessionLayer::new(timeout),
+            ip_attempts: ExpiringAttemptMap::new(Duration::from_secs(60 * 60)),
+            username_attempts: ExpiringAttemptMap::new(Duration::from_secs(60 * 60)),
+            user_layer,
+        }
+    }
+}
+impl<Session: 'static> AuthSessionLayer<Session> {
     /// Initiate a session gated by authentication and return the session key
     pub async fn login(
         &mut self,
@@ -124,14 +137,18 @@ impl<Session: 'static> AuthSessionLayer<Session> {
         credential: &BasicCredential,
         new_session: impl FnOnce() -> Session,
     ) -> Result<String, LoginError> {
+        if self.username_attempts.is_banned(&credential.username) {
+            return Err(LoginError::TooManyAttempts);
+        }
         if let Some(ip_addr) = ip_addr {
-            if self.banned(ip_addr) {
+            if self.ip_attempts.is_banned(&ip_addr) {
                 return Err(LoginError::TooManyAttempts);
             }
         }
         if !self.user_layer.auth(credential).await {
+            self.username_attempts.fail(&credential.username);
             if let Some(ip_addr) = ip_addr {
-                self.fail(ip_addr);
+                self.ip_attempts.fail(&ip_addr);
             }
             return Err(LoginError::WrongCreds);
         }
@@ -156,14 +173,14 @@ impl<Session: 'static> AuthSessionLayer<Session> {
         session_key: &str,
     ) -> Option<AuthSession<Session>> {
         if let Some(ip_addr) = ip_addr {
-            if self.banned(ip_addr) {
+            if self.ip_attempts.is_banned(&ip_addr) {
                 return None;
             }
         }
         let res = { self.session.get(session_key).cloned() };
         if res.is_none() {
             if let Some(ip_addr) = ip_addr {
-                self.fail(ip_addr);
+                self.ip_attempts.fail(&ip_addr);
             }
         }
         res
@@ -176,8 +193,9 @@ impl<Session: 'static> AuthSessionLayer<Session> {
     ) -> Result<(), &'static str> {
         let res = self.user_layer.change_password(args).await;
         if res.is_err() {
+            self.username_attempts.fail(&args.credential.username);
             if let Some(ip_addr) = ip_addr {
-                self.fail(ip_addr);
+                self.ip_attempts.fail(&ip_addr);
             }
         }
         res
