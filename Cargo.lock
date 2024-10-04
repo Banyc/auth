@@ -690,7 +690,7 @@ dependencies = [
 [[package]]
 name = "htmx_util"
 version = "0.1.0"
-source = "git+https://github.com/Banyc/htmx_util.git?rev=3796508cb76dad103ce437369782140a0468f795#3796508cb76dad103ce437369782140a0468f795"
+source = "git+https://github.com/Banyc/htmx_util.git?tag=v0.0.1#3796508cb76dad103ce437369782140a0468f795"
 dependencies = [
  "maud",
 ]
